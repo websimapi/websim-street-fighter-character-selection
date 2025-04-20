@@ -408,7 +408,7 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                     let maxHeight = 0;
                     
                     // Check how far down we can go following the left edge
-                    for (let y = startY + 1; y < height; y++) {
+                    for (let y = startY + 1; y < startY + height/2; y++) { 
                         if (isGreen(startX, y)) {
                             maxHeight = y - startY;
                         } else {
@@ -432,10 +432,10 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                     if (rightHeight < minCellSize) return null;
                     
                     // Use the smaller of the two heights
-                    const height = Math.min(maxHeight, rightHeight);
+                    const rectHeight = Math.min(maxHeight, rightHeight);
                     
                     // Check bottom horizontal line
-                    let bottomY = startY + height;
+                    let bottomY = startY + rectHeight;
                     let bottomLine = true;
                     for (let x = startX; x <= endX; x++) {
                         if (!isGreen(x, bottomY)) {
@@ -447,14 +447,14 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                     if (!bottomLine) return null;
                     
                     // We found a rectangle! Check if it has content inside
-                    const cellId = `${startX},${startY},${lineLength},${height}`;
+                    const cellId = `${startX},${startY},${lineLength},${rectHeight}`;
                     if (visited.has(cellId)) return null;
                     visited.add(cellId);
                     
                     // Check for non-green content inside the rectangle
                     let nonGreenCount = 0;
                     const innerPadding = 5; // Padding to avoid counting the outline
-                    for (let y = startY + innerPadding; y < startY + height - innerPadding; y += 2) {
+                    for (let y = startY + innerPadding; y < startY + rectHeight - innerPadding; y += 2) {
                         for (let x = startX + innerPadding; x < startX + lineLength - innerPadding; x += 2) {
                             if (!isGreen(x, y)) {
                                 nonGreenCount++;
@@ -465,8 +465,8 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                                     x: startX,
                                     y: startY,
                                     width: lineLength,
-                                    height: height,
-                                    contentRatio: nonGreenCount / ((lineLength - 2 * innerPadding) * (height - 2 * innerPadding) / 4)
+                                    height: rectHeight,
+                                    contentRatio: nonGreenCount / ((lineLength - 2 * innerPadding) * (rectHeight - 2 * innerPadding) / 4)
                                 };
                             }
                         }
