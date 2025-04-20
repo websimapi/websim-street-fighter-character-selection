@@ -302,7 +302,7 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                 characterSelectScreen.src = result.url;
                 
                 characterSelectScreen.onload = () => {
-                    // After the image is loaded, process it to "detect" character squares
+                    // After the image is loaded, process it to detect character squares
                     setTimeout(() => {
                         processImage(characterSelectScreen);
                     }, 500);
@@ -312,27 +312,222 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                 loadingIndicator.innerHTML = `<div>Error generating image. Please refresh the page.</div>`;
             }
 
-            // Function to "detect" character portraits and create individual cells
+            // Function to detect character portraits and create individual cells
             function processImage(img) {
                 // Setup canvas for image processing
                 processingCanvas.width = img.naturalWidth;
                 processingCanvas.height = img.naturalHeight;
                 ctx.drawImage(img, 0, 0);
-
-                // Calculate dimensions for a 4x4 grid based on image size
-                // This simulates actually detecting the squares by just dividing the image
+                
+                // Get image data for pixel-level analysis
+                const imageData = ctx.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
+                const data = imageData.data;
+                
+                // Define the target color (#39FF14 - neon green)
+                const targetColor = {
+                    r: 57,   // 0x39
+                    g: 255,  // 0xFF
+                    b: 20    // 0x14
+                };
+                
+                // Color matching tolerance (0-255, higher = more lenient)
+                const tolerance = 30;
+                
+                // Function to check if a pixel is close to the target color
+                function isTargetColor(r, g, b) {
+                    return Math.abs(r - targetColor.r) < tolerance &&
+                           Math.abs(g - targetColor.g) < tolerance && 
+                           Math.abs(b - targetColor.b) < tolerance;
+                }
+                
+                // Scan the image to find potential character cells by detecting green outlines
+                // First, create a heatmap of target color presence
+                const width = processingCanvas.width;
+                const height = processingCanvas.height;
+                const heatmap = new Array(width * height).fill(0);
+                
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const idx = (y * width + x) * 4;
+                        const r = data[idx];
+                        const g = data[idx + 1];
+                        const b = data[idx + 2];
+                        
+                        if (isTargetColor(r, g, b)) {
+                            heatmap[y * width + x] = 1;
+                        }
+                    }
+                }
+                
+                // Use heatmap to identify connected regions of green (cell outlines)
+                const cellRegions = [];
+                
+                // Simplified detection for a 4x4 grid
+                // Divide the image into regions and look for concentrations of the target color
+                const gridRows = 4;
+                const gridCols = 4;
+                const cellWidth = Math.floor(width / gridCols);
+                const cellHeight = Math.floor(height / gridRows);
+                
+                // For visual debugging
+                ctx.strokeStyle = "red";
+                ctx.lineWidth = 3;
+                
+                for (let row = 0; row < gridRows; row++) {
+                    for (let col = 0; col < gridCols; col++) {
+                        // Base region for this cell
+                        const cellX = col * cellWidth;
+                        const cellY = row * cellHeight;
+                        
+                        // Find the actual borders of the cell by detecting the green outline
+                        let minX = cellX + cellWidth;
+                        let minY = cellY + cellHeight;
+                        let maxX = cellX;
+                        let maxY = cellY;
+                        let greenPixelCount = 0;
+                        
+                        // Scan this region to find the boundaries of the green outline
+                        for (let y = Math.max(0, cellY - 10); y < Math.min(height, cellY + cellHeight + 10); y++) {
+                            for (let x = Math.max(0, cellX - 10); x < Math.min(width, cellX + cellWidth + 10); x++) {
+                                const idx = (y * width + x) * 4;
+                                const r = data[idx];
+                                const g = data[idx + 1];
+                                const b = data[idx + 2];
+                                
+                                if (isTargetColor(r, g, b)) {
+                                    greenPixelCount++;
+                                    minX = Math.min(minX, x);
+                                    minY = Math.min(minY, y);
+                                    maxX = Math.max(maxX, x);
+                                    maxY = Math.max(maxY, y);
+                                }
+                            }
+                        }
+                        
+                        // Ensure minimum green pixels to be considered a valid cell
+                        // and ensure a minimum interior area
+                        if (greenPixelCount > 100 && 
+                            (maxX - minX) > 30 && 
+                            (maxY - minY) > 30) {
+                            
+                            // Expand the cell bounds slightly to ensure we get the complete border
+                            minX = Math.max(0, minX - 3);
+                            minY = Math.max(0, minY - 3);
+                            maxX = Math.min(width, maxX + 3);
+                            maxY = Math.min(height, maxY + 3);
+                            
+                            // Add padding inside to avoid the border
+                            const innerPadding = 5;
+                            const innerMinX = minX + innerPadding;
+                            const innerMinY = minY + innerPadding;
+                            const innerMaxX = maxX - innerPadding;
+                            const innerMaxY = maxY - innerPadding;
+                            
+                            // Check that the inner area is at least 25x25px
+                            if ((innerMaxX - innerMinX) >= 25 && (innerMaxY - innerMinY) >= 25) {
+                                cellRegions.push({
+                                    x: minX,
+                                    y: minY,
+                                    width: maxX - minX,
+                                    height: maxY - minY,
+                                    index: row * gridCols + col
+                                });
+                                
+                                // Draw detection rectangles for debugging (will be hidden)
+                                ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+                            }
+                        }
+                    }
+                }
+                
+                // Create individual cells for each character
+                characterGrid.innerHTML = '';
+                const characters = characterSelectionTemplate.characters;
+                
+                // Use the detected regions to create character cells
+                cellRegions.forEach(region => {
+                    const index = region.index;
+                    const character = characters[index];
+                    
+                    if (!character) return; // Skip if invalid index
+                    
+                    // Create a div for this character
+                    const cell = document.createElement('div');
+                    cell.className = 'character-cell';
+                    cell.setAttribute('data-index', index);
+                    
+                    // Create elements for portrait and name
+                    const portrait = document.createElement('div');
+                    portrait.className = 'character-portrait';
+                    
+                    // Calculate crop and positioning values
+                    portrait.style.backgroundImage = `url(${img.src})`;
+                    
+                    // Calculate the background position to show just this cell's portion
+                    const bgPosX = -(region.x / img.naturalWidth * 100);
+                    const bgPosY = -(region.y / img.naturalHeight * 100);
+                    const bgSizeX = (img.naturalWidth / region.width * 100);
+                    const bgSizeY = (img.naturalHeight / region.height * 100);
+                    
+                    portrait.style.backgroundPosition = `${bgPosX}% ${bgPosY}%`;
+                    portrait.style.backgroundSize = `${bgSizeX}% ${bgSizeY}%`;
+                    
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'character-name';
+                    nameDiv.textContent = character.name;
+                    
+                    // Add elements to the cell
+                    cell.appendChild(portrait);
+                    cell.appendChild(nameDiv);
+                    
+                    // Add click handler
+                    cell.addEventListener('click', () => {
+                        // Remove selected class from all cells
+                        document.querySelectorAll('.character-cell').forEach(c => {
+                            c.classList.remove('selected');
+                        });
+                        
+                        // Add selected class to this cell
+                        cell.classList.add('selected');
+                        
+                        // Update character detail panel
+                        detailPortrait.style.backgroundImage = portrait.style.backgroundImage;
+                        detailPortrait.style.backgroundPosition = portrait.style.backgroundPosition;
+                        detailPortrait.style.backgroundSize = portrait.style.backgroundSize;
+                        detailName.textContent = character.name;
+                        detailCountry.textContent = character.country;
+                        
+                        // Show the detail panel
+                        characterDetail.classList.add('visible');
+                    });
+                    
+                    characterGrid.appendChild(cell);
+                });
+                
+                // If we didn't find all the cells, fall back to grid-based division
+                if (cellRegions.length < 16) {
+                    console.warn(`Only detected ${cellRegions.length} cells, falling back to grid-based division`);
+                    fallbackGridDetection(img);
+                } else {
+                    // Hide loading indicator after grid creation
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+            
+            // Fallback to grid-based division if detection fails
+            function fallbackGridDetection(img) {
+                console.log("Using fallback grid detection");
+                // Calculate dimensions for a 4x4 grid
                 const gridColumns = 4;
                 const gridRows = 4;
                 
-                // Determine the region of the image that contains the actual grid
-                // For simplicity, we'll assume the grid takes up approximately 90% of the image
-                // with some margin on all sides
-                const marginPercent = 0.05; // 5% margin on each side
+                // Use the full image area with small margins
+                const marginPercent = 0.05;
                 const gridWidth = img.naturalWidth * (1 - 2 * marginPercent);
                 const gridHeight = img.naturalHeight * (1 - 2 * marginPercent);
                 const startX = img.naturalWidth * marginPercent;
                 const startY = img.naturalHeight * marginPercent;
-
+                
                 // Calculate cell dimensions
                 const cellWidth = gridWidth / gridColumns;
                 const cellHeight = gridHeight / gridRows;
@@ -350,18 +545,15 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                         const x = startX + col * cellWidth;
                         const y = startY + row * cellHeight;
                         
-                        // Create a div for this character
+                        // Create cell elements as before
                         const cell = document.createElement('div');
                         cell.className = 'character-cell';
                         cell.setAttribute('data-index', index);
                         
-                        // Create elements for portrait and name
                         const portrait = document.createElement('div');
                         portrait.className = 'character-portrait';
-                        // Set the background to be a portion of the original image
                         portrait.style.backgroundImage = `url(${img.src})`;
                         
-                        // Calculate the background position to show just this cell's portion
                         const bgPosX = -(x / img.naturalWidth * 100);
                         const bgPosY = -(y / img.naturalHeight * 100);
                         const bgSizeX = (img.naturalWidth / cellWidth * 100);
@@ -374,28 +566,22 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                         nameDiv.className = 'character-name';
                         nameDiv.textContent = character.name;
                         
-                        // Add elements to the cell
                         cell.appendChild(portrait);
                         cell.appendChild(nameDiv);
                         
-                        // Add click handler
                         cell.addEventListener('click', () => {
-                            // Remove selected class from all cells
                             document.querySelectorAll('.character-cell').forEach(c => {
                                 c.classList.remove('selected');
                             });
                             
-                            // Add selected class to this cell
                             cell.classList.add('selected');
                             
-                            // Update character detail panel
                             detailPortrait.style.backgroundImage = portrait.style.backgroundImage;
                             detailPortrait.style.backgroundPosition = portrait.style.backgroundPosition;
                             detailPortrait.style.backgroundSize = portrait.style.backgroundSize;
                             detailName.textContent = character.name;
                             detailCountry.textContent = character.country;
                             
-                            // Show the detail panel
                             characterDetail.classList.add('visible');
                         });
                         
@@ -403,7 +589,7 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                     }
                 }
                 
-                // Hide loading indicator after grid creation
+                // Hide loading indicator
                 loadingIndicator.style.display = 'none';
             }
         });
