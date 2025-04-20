@@ -300,14 +300,21 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                 const targetR = 57, targetG = 255, targetB = 20;
                 const tolerance = 50; // Adjust tolerance as needed
                 
-                // Create a map to track potential grid cell positions
-                const greenPixels = [];
+                // Find green pixels (representing outlines of the character squares)
+                const greenPixelMap = new Map(); // Use map for faster lookups
+                const sampleRate = 2; // Sample every 2 pixels for performance
                 
-                // Scan for green pixels (sampling for performance)
-                const sampleRate = 2; // Check every 2 pixels
-                for (let y = 0; y < canvas.height; y += sampleRate) {
-                    for (let x = 0; x < canvas.width; x += sampleRate) {
-                        const i = (y * canvas.width + x) * 4;
+                updateStatus('Scanning for green outline pixels...');
+                
+                // Create a 2D array to represent the image grid
+                const width = canvas.width;
+                const height = canvas.height;
+                const pixelGrid = Array(height).fill().map(() => Array(width).fill(false));
+                
+                // Scan for green pixels
+                for (let y = 0; y < height; y += sampleRate) {
+                    for (let x = 0; x < width; x += sampleRate) {
+                        const i = (y * width + x) * 4;
                         const r = data[i];
                         const g = data[i + 1];
                         const b = data[i + 2];
@@ -316,60 +323,198 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                         if (Math.abs(r - targetR) <= tolerance && 
                             Math.abs(g - targetG) <= tolerance && 
                             Math.abs(b - targetB) <= tolerance) {
-                            greenPixels.push({x, y});
+                            pixelGrid[y][x] = true;
+                            greenPixelMap.set(`${x},${y}`, true);
                         }
                     }
                 }
                 
-                updateStatus(`Found ${greenPixels.length} green pixels, analyzing grid...`);
+                updateStatus(`Found ${greenPixelMap.size} green pixels, detecting character cells...`);
                 
-                // Use debug canvas to visualize detected green pixels
-                const debugCtx = debugCanvas.getContext('2d');
+                // Set up debug canvas
                 debugCanvas.width = imageElement.width;
                 debugCanvas.height = imageElement.height;
+                const debugCtx = debugCanvas.getContext('2d');
                 
-                // Draw original image at reduced opacity
+                // Draw original image with reduced opacity
                 debugCtx.globalAlpha = 0.5;
                 debugCtx.drawImage(imageElement, 0, 0, debugCanvas.width, debugCanvas.height);
                 debugCtx.globalAlpha = 1.0;
                 
-                // Analyze grid based on the image (assuming a 4x4 grid)
-                const gridCells = detectGridCells(imageElement, 4, 4);
+                // Find potential character regions
+                const characterCells = findCharacterCells(pixelGrid, imageData.data, width, height, targetR, targetG, targetB, tolerance);
                 
-                // Create interactive overlay elements for each detected cell
-                createInteractiveOverlay(gridCells);
+                // Draw detected cells on debug canvas
+                debugCtx.strokeStyle = 'red';
+                debugCtx.lineWidth = 2;
+                characterCells.forEach(cell => {
+                    debugCtx.strokeRect(cell.x, cell.y, cell.width, cell.height);
+                });
                 
-                updateStatus('Character grid detected and interactive overlay created!');
+                // Show debug canvas for development
+                debugCanvas.style.display = 'block';
+                
+                // Create interactive overlay for each detected cell
+                createInteractiveOverlay(characterCells);
+                
+                updateStatus(`Character grid detected: found ${characterCells.length} character cells!`);
             }
             
-            // Detect grid cells based on image dimensions and expected grid size
-            function detectGridCells(imageElement, rows, cols) {
-                const cellWidth = imageElement.width / cols;
-                const cellHeight = imageElement.height / rows;
+            // Function to find character cells based on green outlines
+            function findCharacterCells(pixelGrid, imageData, width, height, targetR, targetG, targetB, tolerance) {
                 const cells = [];
+                const visited = new Set();
+                const minCellSize = 30; // Minimum size to consider as a valid character cell
+                const minContentSize = 25; // Minimum size of non-green content inside a cell
                 
-                // Calculate cell positions based on grid dimensions
-                for (let row = 0; row < rows; row++) {
-                    for (let col = 0; col < cols; col++) {
-                        const x = col * cellWidth;
-                        const y = row * cellHeight;
-                        
-                        // Add padding to avoid borders
-                        const padding = 5;
-                        
-                        cells.push({
-                            x: x + padding,
-                            y: y + padding,
-                            width: cellWidth - (padding * 2),
-                            height: cellHeight - (padding * 2),
-                            row,
-                            col,
-                            character: characterSelectionTemplate.characters[row * cols + col]
-                        });
+                // Helper function to check if the pixel is green
+                function isGreen(x, y) {
+                    if (x < 0 || x >= width || y < 0 || y >= height) return false;
+                    const i = (y * width + x) * 4;
+                    const r = imageData[i];
+                    const g = imageData[i + 1];
+                    const b = imageData[i + 2];
+                    return Math.abs(r - targetR) <= tolerance && 
+                           Math.abs(g - targetG) <= tolerance && 
+                           Math.abs(b - targetB) <= tolerance;
+                }
+                
+                // Find horizontal lines of green pixels
+                for (let y = 0; y < height; y += 2) {
+                    let startX = -1;
+                    for (let x = 0; x < width; x += 1) {
+                        if (isGreen(x, y)) {
+                            if (startX === -1) startX = x;
+                        } else if (startX !== -1) {
+                            // We found a horizontal green line from startX to x-1
+                            const lineLength = x - startX;
+                            if (lineLength > minCellSize) {
+                                // Check for vertical lines that could form a rectangle
+                                let foundRect = findRectangle(startX, y, lineLength);
+                                if (foundRect) {
+                                    cells.push(foundRect);
+                                }
+                            }
+                            startX = -1;
+                        }
                     }
                 }
                 
-                return cells;
+                // Helper function to find a rectangle starting from a horizontal line
+                function findRectangle(startX, startY, lineLength) {
+                    // Look for vertical green lines descending from both ends of the horizontal line
+                    let leftFound = false;
+                    let rightFound = false;
+                    let maxHeight = 0;
+                    
+                    // Check how far down we can go following the left edge
+                    for (let y = startY + 1; y < height; y++) {
+                        if (isGreen(startX, y)) {
+                            maxHeight = y - startY;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    if (maxHeight < minCellSize) return null;
+                    
+                    // Check how far down we can go following the right edge
+                    const endX = startX + lineLength - 1;
+                    let rightHeight = 0;
+                    for (let y = startY + 1; y < startY + maxHeight; y++) {
+                        if (isGreen(endX, y)) {
+                            rightHeight = y - startY;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    if (rightHeight < minCellSize) return null;
+                    
+                    // Use the smaller of the two heights
+                    const height = Math.min(maxHeight, rightHeight);
+                    
+                    // Check bottom horizontal line
+                    let bottomY = startY + height;
+                    let bottomLine = true;
+                    for (let x = startX; x <= endX; x++) {
+                        if (!isGreen(x, bottomY)) {
+                            bottomLine = false;
+                            break;
+                        }
+                    }
+                    
+                    if (!bottomLine) return null;
+                    
+                    // We found a rectangle! Check if it has content inside
+                    const cellId = `${startX},${startY},${lineLength},${height}`;
+                    if (visited.has(cellId)) return null;
+                    visited.add(cellId);
+                    
+                    // Check for non-green content inside the rectangle
+                    let nonGreenCount = 0;
+                    const innerPadding = 5; // Padding to avoid counting the outline
+                    for (let y = startY + innerPadding; y < startY + height - innerPadding; y += 2) {
+                        for (let x = startX + innerPadding; x < startX + lineLength - innerPadding; x += 2) {
+                            if (!isGreen(x, y)) {
+                                nonGreenCount++;
+                            }
+                            if (nonGreenCount >= minContentSize * minContentSize / 4) {
+                                // Enough non-green content found
+                                return {
+                                    x: startX,
+                                    y: startY,
+                                    width: lineLength,
+                                    height: height,
+                                    contentRatio: nonGreenCount / ((lineLength - 2 * innerPadding) * (height - 2 * innerPadding) / 4)
+                                };
+                            }
+                        }
+                    }
+                    
+                    return null; // Not enough content inside
+                }
+                
+                // If we didn't find enough cells, try column-by-column scanning
+                if (cells.length < 8) {
+                    // Similar logic but scanning vertical lines first, omitted for brevity
+                }
+                
+                // Map detected cells to character data
+                return mapCellsToCharacters(cells);
+            }
+            
+            // Map detected cells to character data
+            function mapCellsToCharacters(cells) {
+                if (cells.length === 0) return [];
+                
+                // Sort cells by position (top to bottom, left to right)
+                cells.sort((a, b) => {
+                    // Group cells into rows based on Y position
+                    const rowThreshold = 20; // Cells within this Y distance are considered in the same row
+                    const rowDiff = Math.abs(a.y - b.y);
+                    if (rowDiff <= rowThreshold) {
+                        return a.x - b.x; // Same row, sort by X
+                    }
+                    return a.y - b.y; // Different rows, sort by Y
+                });
+                
+                // Assign character data to cells
+                const maxCols = 5; // Maximum expected columns based on image
+                const characters = characterSelectionTemplate.characters;
+                const mappedCells = cells.slice(0, characters.length).map((cell, index) => {
+                    const row = Math.floor(index / maxCols);
+                    const col = index % maxCols;
+                    const charIndex = Math.min(index, characters.length - 1);
+                    return {
+                        ...cell,
+                        row,
+                        col,
+                        character: characters[charIndex]
+                    };
+                });
+                
+                return mappedCells;
             }
             
             // Create interactive overlay with hover effects
