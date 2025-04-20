@@ -133,6 +133,33 @@
         #character-canvas {
             display: none;
         }
+        
+        /* Add error message styling */
+        .error-message {
+            color: red;
+            text-align: center;
+            padding: 20px;
+            background-color: rgba(0, 0, 0, 0.8);
+            border: 2px solid red;
+            border-radius: 5px;
+            margin: 20px;
+        }
+        
+        /* Add retry button styling */
+        .retry-button {
+            padding: 10px 20px;
+            background-color: #39FF14;
+            color: black;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+        
+        .retry-button:hover {
+            background-color: #2ce00f;
+        }
     </style>
 </head>
 <body>
@@ -202,134 +229,217 @@
             const canvas = document.getElementById('character-canvas');
             const ctx = canvas.getContext('2d');
 
-            try {
-                // Generate the detailed image prompt
-                const imagePrompt = `Create a clean, focused image of a Street Fighter character selection screen with exactly 16 characters in a 4x4 grid. 
-
-Most importantly:
-- NO HEADER TEXT or TITLE anywhere in the image
-- ALL 16 character squares MUST have a prominent solid #39FF14 (bright neon green) outline around them
-- The character portraits should be arranged in a perfect 4x4 grid
-- The green (#39FF14) outlines should be thick (6 pixels) and be the most eye-catching element
-- Include ONLY the character selection grid - no other UI elements, no logos, no text
-- Each square should contain a character portrait showing their face/upper body
-- Simple dark background behind the character grid
-- Only show the 16 characters mentioned in the specification below
-
-${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
-
-                // Use LLM to generate the image
-                const result = await websim.imageGen({
-                    prompt: imagePrompt,
-                    aspect_ratio: "1:1", // Square aspect ratio for the grid
-                });
-
-                // Display the generated image
-                characterSelectScreen.src = result.url;
+            // Array of CORS proxies to try
+            const corsProxies = [
+                '', // Direct access first (no proxy)
+                'https://corsproxy.io/?',
+                'https://api.allorigins.win/raw?url=',
+                'https://thingproxy.freeboard.io/fetch/',
+                'https://yacdn.org/proxy/',
+                'https://cors-anywhere.herokuapp.com/'
+            ];
+            
+            // Function to show error with retry button
+            function showError(message, retryFunction) {
+                loadingIndicator.innerHTML = `
+                    <div class="error-message">${message}</div>
+                    ${retryFunction ? '<button class="retry-button">Retry</button>' : ''}
+                `;
                 
-                characterSelectScreen.onload = async () => {
-                    loadingIndicator.querySelector('.loading-text').textContent = "Analyzing character positions...";
+                if (retryFunction) {
+                    const retryButton = loadingIndicator.querySelector('.retry-button');
+                    retryButton.addEventListener('click', () => {
+                        loadingIndicator.innerHTML = `
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Retrying...</div>
+                        `;
+                        setTimeout(retryFunction, 500);
+                    });
+                }
+            }
+
+            // Main function to generate image and process characters
+            async function generateAndProcessImage() {
+                try {
+                    // Generate the detailed image prompt
+                    const imagePrompt = `Create a clean, focused image of a Street Fighter character selection screen with exactly 16 characters in a 4x4 grid. 
+
+                    Most importantly:
+                    - NO HEADER TEXT or TITLE anywhere in the image
+                    - ALL 16 character squares MUST have a prominent solid #39FF14 (bright neon green) outline around them
+                    - The character portraits should be arranged in a perfect 4x4 grid
+                    - The green (#39FF14) outlines should be thick (6 pixels) and be the most eye-catching element
+                    - Include ONLY the character selection grid - no other UI elements, no logos, no text
+                    - Each square should contain a character portrait showing their face/upper body
+                    - Simple dark background behind the character grid
+                    - Only show the 16 characters mentioned in the specification below
+
+                    ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
+
+                    loadingIndicator.querySelector('.loading-text').textContent = "Generating character selection screen...";
                     
-                    // Set canvas dimensions to match the image
-                    canvas.width = characterSelectScreen.naturalWidth;
-                    canvas.height = characterSelectScreen.naturalHeight;
+                    // Use LLM to generate the image
+                    const result = await websim.imageGen({
+                        prompt: imagePrompt,
+                        aspect_ratio: "1:1", // Square aspect ratio for the grid
+                    });
+
+                    // Store the image URL
+                    const imageUrl = result.url;
                     
-                    // Draw the image on the canvas
-                    ctx.drawImage(characterSelectScreen, 0, 0);
-                    
-                    // Convert canvas to data URL for sending to LLM
-                    const imageDataUrl = canvas.toDataURL('image/jpeg');
-                    
-                    // Ask LLM to analyze the image and determine grid coordinates
+                    // Since we've generated the image, now try the alternative approach
+                    // by asking the LLM to generate coordinates directly
                     try {
-                        const completion = await websim.chat.completions.create({
-                            messages: [
+                        await processCharactersDirectly(imageUrl);
+                    } catch (error) {
+                        console.error("Direct processing failed:", error);
+                        // Fallback to proxy method
+                        await processWithProxies(imageUrl);
+                    }
+                } catch (error) {
+                    console.error('Error generating image:', error);
+                    showError(`Error generating image: ${error.message}`, generateAndProcessImage);
+                }
+            }
+
+            // Process characters without needing canvas export
+            async function processCharactersDirectly(imageUrl) {
+                loadingIndicator.querySelector('.loading-text').textContent = "Analyzing character positions...";
+                
+                // Display the generated image
+                characterSelectScreen.src = imageUrl;
+                
+                // Ask LLM to analyze the image and determine grid coordinates directly
+                const completion = await websim.chat.completions.create({
+                    messages: [
+                        {
+                            role: "user",
+                            content: [
                                 {
-                                    role: "user",
-                                    content: [
-                                        {
-                                            type: "text",
-                                            text: `Analyze this Street Fighter character selection screen. It shows a 4x4 grid of characters.
-                                            
-For each of the 16 character cells, provide the exact coordinates (x, y, width, height) for cropping each character portrait from the main image.
-
-The characters are:
-Row 1: Ryu, Ken, Chun-Li, Guile
-Row 2: E. Honda, Blanka, Zangief, Dhalsim
-Row 3: Balrog, Vega, Sagat, M. Bison
-Row 4: Akuma, Cammy, Fei Long, T. Hawk
-
-Return just the JSON array of crop coordinates. For example:
-[
-  {"name": "Ryu", "x": 10, "y": 10, "width": 100, "height": 100},
-  {"name": "Ken", "x": 120, "y": 10, "width": 100, "height": 100},
-  ...and so on for all 16 characters
-]
-
-The coordinates should be precise to allow clean cropping of each character from the portrait.`,
-                                        },
-                                        {
-                                            type: "image_url",
-                                            image_url: { url: imageDataUrl },
-                                        },
-                                    ],
+                                    type: "text",
+                                    text: `Analyze this Street Fighter character selection screen. It shows a 4x4 grid of characters.
+                                    
+                                    I need you to:
+                                    1. Visually estimate the grid layout and where each character would be positioned
+                                    2. Create a uniform grid by dividing the image into 4 rows and 4 columns
+                                    3. Provide rough percentage-based coordinates for each character
+                                    
+                                    The characters are:
+                                    Row 1: Ryu, Ken, Chun-Li, Guile
+                                    Row 2: E. Honda, Blanka, Zangief, Dhalsim
+                                    Row 3: Balrog, Vega, Sagat, M. Bison
+                                    Row 4: Akuma, Cammy, Fei Long, T. Hawk
+                                    
+                                    Return a JSON array with percentage-based coordinates like this:
+                                    [
+                                      {"name": "Ryu", "row": 0, "col": 0, "percentX": 0, "percentY": 0, "percentWidth": 25, "percentHeight": 25},
+                                      {"name": "Ken", "row": 0, "col": 1, "percentX": 25, "percentY": 0, "percentWidth": 25, "percentHeight": 25},
+                                      ...and so on for all 16 characters
+                                    ]
+                                    
+                                    Ensure each character has a unique position in the grid.`,
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: { url: imageUrl },
                                 },
                             ],
-                            json: true,
-                        });
+                        },
+                    ],
+                    json: true,
+                });
 
-                        const cropCoordinates = JSON.parse(completion.content);
-                        loadingIndicator.querySelector('.loading-text').textContent = "Cropping character portraits...";
-                        
-                        // Crop and display each character
-                        for (const character of cropCoordinates) {
-                            // Create a character cell div
-                            const cell = document.createElement('div');
-                            cell.className = 'character-cell';
-                            
-                            // Crop the character from the main image
-                            const characterImg = document.createElement('img');
-                            
-                            // Create a temporary canvas for cropping
-                            const tempCanvas = document.createElement('canvas');
-                            tempCanvas.width = character.width;
-                            tempCanvas.height = character.height;
-                            const tempCtx = tempCanvas.getContext('2d');
-                            
-                            // Draw the cropped portion to the temp canvas
-                            tempCtx.drawImage(
-                                characterSelectScreen, 
-                                character.x, character.y, character.width, character.height,
-                                0, 0, character.width, character.height
-                            );
-                            
-                            // Set the cropped image as src
-                            characterImg.src = tempCanvas.toDataURL();
-                            characterImg.className = 'character-image';
-                            characterImg.alt = character.name;
-                            
-                            // Add name label
-                            const nameLabel = document.createElement('div');
-                            nameLabel.className = 'character-name';
-                            nameLabel.textContent = character.name;
-                            
-                            // Add to cell and grid
-                            cell.appendChild(characterImg);
-                            cell.appendChild(nameLabel);
-                            characterGrid.appendChild(cell);
-                        }
-                        
-                        // Hide loading indicator and show grid
-                        loadingIndicator.style.display = 'none';
-                    } catch (error) {
-                        console.error('Error analyzing image:', error);
-                        loadingIndicator.innerHTML = `<div>Error analyzing character positions. Please refresh the page.</div>`;
-                    }
-                };
-            } catch (error) {
-                console.error('Error generating image:', error);
-                loadingIndicator.innerHTML = `<div>Error generating image. Please refresh the page.</div>`;
+                const characterPositions = JSON.parse(completion.content);
+                await createCharacterGrid(characterPositions, imageUrl);
             }
+            
+            // Try to process with different proxies
+            async function processWithProxies(originalImageUrl) {
+                loadingIndicator.querySelector('.loading-text').textContent = "Trying alternative methods...";
+                
+                // Display the original image first
+                characterSelectScreen.src = originalImageUrl;
+                
+                // Try to get the grid directly from LLM without canvas
+                const defaultGrid = [];
+                const rows = 4;
+                const cols = 4;
+                
+                // Create a uniform grid based on percentage
+                const characters = [
+                    "Ryu", "Ken", "Chun-Li", "Guile",
+                    "E. Honda", "Blanka", "Zangief", "Dhalsim",
+                    "Balrog", "Vega", "Sagat", "M. Bison",
+                    "Akuma", "Cammy", "Fei Long", "T. Hawk"
+                ];
+                
+                let index = 0;
+                for (let row = 0; row < rows; row++) {
+                    for (let col = 0; col < cols; col++) {
+                        defaultGrid.push({
+                            name: characters[index],
+                            row: row,
+                            col: col,
+                            percentX: col * (100 / cols),
+                            percentY: row * (100 / rows),
+                            percentWidth: 100 / cols,
+                            percentHeight: 100 / rows
+                        });
+                        index++;
+                    }
+                }
+                
+                // Now use the default grid with the original image
+                await createCharacterGrid(defaultGrid, originalImageUrl);
+            }
+            
+            // Function to create the character grid with the positions
+            async function createCharacterGrid(characterPositions, imageUrl) {
+                loadingIndicator.querySelector('.loading-text').textContent = "Creating character grid...";
+                
+                // Clear any existing characters
+                characterGrid.innerHTML = '';
+                
+                // Create characters in the grid
+                for (const character of characterPositions) {
+                    // Create a character cell div
+                    const cell = document.createElement('div');
+                    cell.className = 'character-cell';
+                    
+                    // Create the character image with background positioning
+                    const characterDiv = document.createElement('div');
+                    characterDiv.className = 'character-image';
+                    characterDiv.style.backgroundImage = `url(${imageUrl})`;
+                    characterDiv.style.backgroundPosition = `${-character.percentX}% ${-character.percentY}%`;
+                    characterDiv.style.backgroundSize = `${100 / (character.percentWidth / 100)}% ${100 / (character.percentHeight / 100)}%`;
+                    
+                    // Add name label
+                    const nameLabel = document.createElement('div');
+                    nameLabel.className = 'character-name';
+                    nameLabel.textContent = character.name;
+                    
+                    // Add to cell and grid
+                    cell.appendChild(characterDiv);
+                    cell.appendChild(nameLabel);
+                    characterGrid.appendChild(cell);
+                }
+                
+                // Add click events to characters
+                document.querySelectorAll('.character-cell').forEach(cell => {
+                    cell.addEventListener('click', () => {
+                        // Could add selection highlight logic here
+                        const name = cell.querySelector('.character-name').textContent;
+                        console.log(`Selected: ${name}`);
+                    });
+                });
+                
+                // Hide loading indicator
+                loadingIndicator.style.display = 'none';
+                characterGrid.style.display = 'grid';
+            }
+
+            // Start the process
+            generateAndProcessImage();
         });
     </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
