@@ -102,18 +102,18 @@
         }
 
         .character-cell {
-            aspect-ratio: 1;
-            background-size: contain;
-            background-repeat: no-repeat;
-            background-position: center;
-            border: 2px solid #39FF14;
             position: relative;
+            border: 2px solid #39FF14;
             transition: transform 0.2s;
+            width: 100%;
+            height: 100%;
         }
 
         .character-cell:hover {
             transform: scale(1.05);
             cursor: pointer;
+            z-index: 5;
+            box-shadow: 0 0 15px #39FF14;
         }
 
         .character-name {
@@ -196,67 +196,20 @@
             }
         };
 
-        async function detectCharacterSquares(image) {
-            const canvas = document.getElementById('debug-canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // Set canvas size to match image
-            canvas.width = image.naturalWidth;
-            canvas.height = image.naturalHeight;
-            
-            // Draw image to canvas
-            ctx.drawImage(image, 0, 0);
-            
-            const cellWidth = image.naturalWidth / 4;
-            const cellHeight = image.naturalHeight / 4;
-            const characters = [];
-            
-            // Create offscreen canvas for each cell
-            const offscreenCanvas = document.createElement('canvas');
-            const offscreenCtx = offscreenCanvas.getContext('2d');
-            offscreenCanvas.width = cellWidth;
-            offscreenCanvas.height = cellHeight;
-
-            for (let row = 0; row < 4; row++) {
-                for (let col = 0; col < 4; col++) {
-                    // Clear offscreen canvas
-                    offscreenCtx.clearRect(0, 0, cellWidth, cellHeight);
-                    
-                    // Copy portion of main image to offscreen canvas
-                    offscreenCtx.drawImage(
-                        image,
-                        col * cellWidth,
-                        row * cellHeight,
-                        cellWidth,
-                        cellHeight,
-                        0,
-                        0,
-                        cellWidth,
-                        cellHeight
-                    );
-                    
-                    // Convert to data URL
-                    const dataUrl = offscreenCanvas.toDataURL();
-                    
-                    characters.push({
-                        image: dataUrl,
-                        name: characterSelectionTemplate.characters[row * 4 + col].name,
-                        country: characterSelectionTemplate.characters[row * 4 + col].country
-                    });
-                }
-            }
-            
-            return characters;
-        }
-
-        function displayCharacterGrid(characters) {
+        function displayCharacterGrid(image) {
             const grid = document.getElementById('character-grid');
             grid.innerHTML = '';
             
+            const characters = characterSelectionTemplate.characters;
+            const cellWidth = 100 / 4; // percentage width
+            const cellHeight = 100 / 4; // percentage height
+            
             characters.forEach((character, index) => {
+                const row = Math.floor(index / 4);
+                const col = index % 4;
+                
                 const cell = document.createElement('div');
                 cell.className = 'character-cell';
-                cell.style.backgroundImage = `url(${character.image})`;
                 
                 const nameLabel = document.createElement('div');
                 nameLabel.className = 'character-name';
@@ -264,6 +217,11 @@
                 
                 cell.appendChild(nameLabel);
                 grid.appendChild(cell);
+                
+                // Add click handler
+                cell.addEventListener('click', () => {
+                    alert(`You selected ${character.name} from ${character.country}!`);
+                });
             });
         }
 
@@ -296,9 +254,7 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                 characterSelectScreen.src = result.url;
                 characterSelectScreen.onload = async () => {
                     try {
-                        const characters = await detectCharacterSquares(characterSelectScreen);
-                        displayCharacterGrid(characters);
-                        characterSelectScreen.style.display = 'none';
+                        displayCharacterGrid(characterSelectScreen);
                         loadingIndicator.style.display = 'none';
                     } catch (error) {
                         console.error('Error processing character grid:', error);
