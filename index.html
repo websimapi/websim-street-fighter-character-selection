@@ -101,51 +101,48 @@
     <script type="module">
         // Detailed template for Street Fighter character selection screen
         const characterSelectionTemplate = {
-            title: "Street Fighter II: The World Warrior - Character Selection Screen",
+            title: "Street Fighter Character Selection Screen",
             layout: {
-                background: "Dark arcade-style background with a world map faintly visible, blue/purple gradient with electronic grid lines",
-                foreground: "Character portraits arranged in a 3x4 grid, with player cursor indicators"
+                background: "Dark arcade-style background with electronic grid lines",
+                foreground: "Character portraits arranged in a 4x4 grid"
             },
             characterGrid: {
-                rows: 2,
+                rows: 4,
                 columns: 4,
                 spacing: "Equal spacing between character portraits with clear boundaries"
             },
             selectionIndicator: {
-                type: "Square outline with rounded corners",
-                normalState: "Thin white or yellow outline for unselected but highlighted character",
-                selectedState: "Thick solid #39FF14 (bright neon green) outline for selected characters",
-                animation: "Pulsating effect for the currently highlighted character",
-                thickness: "4-6 pixel bold outline for selected characters",
-                corners: "Slightly rounded corners on the selection box",
+                type: "Square outline with slightly rounded corners",
+                appearance: "ALL character squares have a solid #39FF14 (bright neon green) outline",
+                thickness: "6 pixel bold outline for all characters",
                 additionalEffects: "Inner glow effect emanating from the outline"
             },
             characters: [
-                { name: "Ryu", position: "Top row, first position", country: "Japan" },
-                { name: "E. Honda", position: "Top row, second position", country: "Japan" },
-                { name: "Blanka", position: "Top row, third position", country: "Brazil" },
-                { name: "Guile", position: "Top row, fourth position", country: "USA" },
-                { name: "Ken", position: "Bottom row, first position", country: "USA" },
-                { name: "Chun-Li", position: "Bottom row, second position", country: "China" },
-                { name: "Zangief", position: "Bottom row, third position", country: "USSR" },
-                { name: "Dhalsim", position: "Bottom row, fourth position", country: "India" }
+                { name: "Ryu", position: "Row 1, column 1", country: "Japan" },
+                { name: "Ken", position: "Row 1, column 2", country: "USA" },
+                { name: "Chun-Li", position: "Row 1, column 3", country: "China" },
+                { name: "Guile", position: "Row 1, column 4", country: "USA" },
+                { name: "E. Honda", position: "Row 2, column 1", country: "Japan" },
+                { name: "Blanka", position: "Row 2, column 2", country: "Brazil" },
+                { name: "Zangief", position: "Row 2, column 3", country: "USSR" },
+                { name: "Dhalsim", position: "Row 2, column 4", country: "India" },
+                { name: "Balrog", position: "Row 3, column 1", country: "USA" },
+                { name: "Vega", position: "Row 3, column 2", country: "Spain" },
+                { name: "Sagat", position: "Row 3, column 3", country: "Thailand" },
+                { name: "M. Bison", position: "Row 3, column 4", country: "Unknown" },
+                { name: "Akuma", position: "Row 4, column 1", country: "Japan" },
+                { name: "Cammy", position: "Row 4, column 2", country: "UK" },
+                { name: "Fei Long", position: "Row 4, column 3", country: "Hong Kong" },
+                { name: "T. Hawk", position: "Row 4, column 4", country: "Mexico" }
             ],
-            UI: {
-                header: "STREET FIGHTER II logo prominently displayed at the top, with 'SELECT YOUR FIGHTER' text below it",
-                playerIndicators: "P1 and P2 indicators showing which character each player has selected",
-                characterInfo: "Character name and country flag displayed under the highlighted character",
-                bottomText: "PRESS BUTTON TO SELECT flashing at the bottom of the screen",
-                arcadeElements: "Credit counter in the bottom corner, authentic arcade machine styling"
-            },
             visualStyle: {
-                characterPortraits: "Close-up headshots/upper body shots of each fighter in their iconic pose",
-                lighting: "Characters appear with dynamic lighting and slight 'glow' effect",
-                palette: "Vibrant, high-contrast colors typical of early 90s arcade games",
-                specialEffects: "Slight CRT scan line effect, pixelated aesthetic authentic to the era"
+                characterPortraits: "Headshots/upper body shots of each fighter in their iconic pose",
+                lighting: "Characters appear with dynamic lighting",
+                palette: "Vibrant, high-contrast colors"
             },
             specificDetails: {
-                selectionRules: "ALL selectable characters have a solid #39FF14 (bright neon green) outline around them",
-                styleNote: "The selection indicators should pulse and glow in a way that was impressive for early 90s arcade technology"
+                selectionRules: "ALL 16 character squares MUST have a solid #39FF14 (bright neon green) outline around them",
+                styleNote: "FOCUS ONLY ON THE CHARACTER GRID WITH GREEN OUTLINES - NO OTHER UI ELEMENTS"
             }
         };
 
@@ -155,22 +152,23 @@
 
             try {
                 // Generate the detailed image prompt
-                const imagePrompt = `Create a photorealistic image of an arcade Street Fighter II character selection screen based on this detailed specification:
-                
-${JSON.stringify(characterSelectionTemplate, null, 2)}
+                const imagePrompt = `Create a clean, focused image of a Street Fighter character selection screen with exactly 16 characters in a 4x4 grid. 
 
 Most importantly:
-- All selectable characters MUST have a vibrant solid #39FF14 (bright neon green) outline around them
-- The image should look like a photograph of an authentic arcade cabinet screen from the early 90s
-- Include the iconic STREET FIGHTER II logo at the top
-- The character portraits should be arranged in a perfect grid
-- Add subtle CRT screen effects like scan lines and slight screen glow
-- The green (#39FF14) outlines must be the most eye-catching element in the image`;
+- ALL 16 character squares MUST have a prominent solid #39FF14 (bright neon green) outline around them
+- The character portraits should be arranged in a perfect 4x4 grid
+- The green (#39FF14) outlines should be thick (6 pixels) and be the most eye-catching element
+- Include ONLY the character selection grid - no other UI elements, no logos, no text
+- Each square should contain a character portrait showing their face/upper body
+- Simple dark background behind the character grid
+- Only show the 16 characters mentioned in the specification below
+
+${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
 
                 // Use LLM to generate the image
                 const result = await websim.imageGen({
                     prompt: imagePrompt,
-                    aspect_ratio: "4:3", // Classic arcade aspect ratio
+                    aspect_ratio: "1:1", // Square aspect ratio for the grid
                 });
 
                 // Display the generated image
@@ -187,4 +185,3 @@ Most importantly:
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
-
