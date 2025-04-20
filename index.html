@@ -106,11 +106,31 @@
             box-sizing: border-box;
             cursor: pointer;
             pointer-events: auto;
-            transition: border-color 0.2s ease;
+            transition: all 0.2s ease;
         }
         
         .character-cell:hover {
             border-color: #FF3939; /* Red hover color */
+            box-shadow: 0 0 10px #FF3939, inset 0 0 10px #FF3939;
+            z-index: 20;
+        }
+        
+        .character-name {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            text-align: center;
+            padding: 4px;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        
+        .character-cell:hover .character-name {
+            opacity: 1;
         }
         
         #debug-canvas {
@@ -301,20 +321,15 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                 const tolerance = 50; // Adjust tolerance as needed
                 
                 // Find green pixels (representing outlines of the character squares)
-                const greenPixelMap = new Map(); // Use map for faster lookups
+                const greenPixels = [];
                 const sampleRate = 2; // Sample every 2 pixels for performance
                 
                 updateStatus('Scanning for green outline pixels...');
                 
-                // Create a 2D array to represent the image grid
-                const width = canvas.width;
-                const height = canvas.height;
-                const pixelGrid = Array(height).fill().map(() => Array(width).fill(false));
-                
                 // Scan for green pixels
-                for (let y = 0; y < height; y += sampleRate) {
-                    for (let x = 0; x < width; x += sampleRate) {
-                        const i = (y * width + x) * 4;
+                for (let y = 0; y < canvas.height; y += sampleRate) {
+                    for (let x = 0; x < canvas.width; x += sampleRate) {
+                        const i = (y * canvas.width + x) * 4;
                         const r = data[i];
                         const g = data[i + 1];
                         const b = data[i + 2];
@@ -323,13 +338,12 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                         if (Math.abs(r - targetR) <= tolerance && 
                             Math.abs(g - targetG) <= tolerance && 
                             Math.abs(b - targetB) <= tolerance) {
-                            pixelGrid[y][x] = true;
-                            greenPixelMap.set(`${x},${y}`, true);
+                            greenPixels.push({x, y});
                         }
                     }
                 }
                 
-                updateStatus(`Found ${greenPixelMap.size} green pixels, detecting character cells...`);
+                updateStatus(`Found ${greenPixels.length} green pixels, detecting character cells...`);
                 
                 // Set up debug canvas
                 debugCanvas.width = imageElement.width;
@@ -341,14 +355,20 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                 debugCtx.drawImage(imageElement, 0, 0, debugCanvas.width, debugCanvas.height);
                 debugCtx.globalAlpha = 1.0;
                 
-                // Find potential character regions
-                const characterCells = findCharacterCells(pixelGrid, imageData.data, width, height, targetR, targetG, targetB, tolerance);
+                // Improved cell detection using clustering approach
+                const characterCells = improvedCellDetection(greenPixels, canvas.width, canvas.height, data);
                 
                 // Draw detected cells on debug canvas
                 debugCtx.strokeStyle = 'red';
                 debugCtx.lineWidth = 2;
                 characterCells.forEach(cell => {
                     debugCtx.strokeRect(cell.x, cell.y, cell.width, cell.height);
+                    
+                    // Add cell center marker
+                    debugCtx.fillStyle = 'blue';
+                    debugCtx.beginPath();
+                    debugCtx.arc(cell.x + cell.width/2, cell.y + cell.height/2, 5, 0, Math.PI * 2);
+                    debugCtx.fill();
                 });
                 
                 // Show debug canvas for development
@@ -360,161 +380,337 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                 updateStatus(`Character grid detected: found ${characterCells.length} character cells!`);
             }
             
-            // Function to find character cells based on green outlines
-            function findCharacterCells(pixelGrid, imageData, width, height, targetR, targetG, targetB, tolerance) {
+            // Improved cell detection using clustering and heuristics
+            function improvedCellDetection(greenPixels, width, height, imageData) {
+                // First, find potential grid cells using horizontal and vertical density
+                updateStatus('Analyzing pixel density to identify character cells...');
+                
+                // Create horizontal and vertical density histograms
+                const xHistogram = new Array(width).fill(0);
+                const yHistogram = new Array(height).fill(0);
+                
+                greenPixels.forEach(pixel => {
+                    xHistogram[pixel.x]++;
+                    yHistogram[pixel.y]++;
+                });
+                
+                // Find peaks in histograms - these indicate probable grid lines
+                const xPeaks = findPeaks(xHistogram, width * 0.01);
+                const yPeaks = findPeaks(yHistogram, height * 0.01);
+                
+                updateStatus(`Found ${xPeaks.length} vertical lines and ${yPeaks.length} horizontal lines`);
+                
+                // If we have a reasonable number of peaks, assume they form a grid
                 const cells = [];
-                const visited = new Set();
-                const minCellSize = 30; // Minimum size to consider as a valid character cell
-                const minContentSize = 25; // Minimum size of non-green content inside a cell
+                const expectedRows = 4;
+                const expectedCols = 4;
                 
-                // Helper function to check if the pixel is green
-                function isGreen(x, y) {
-                    if (x < 0 || x >= width || y < 0 || y >= height) return false;
-                    const i = (y * width + x) * 4;
-                    const r = imageData[i];
-                    const g = imageData[i + 1];
-                    const b = imageData[i + 2];
-                    return Math.abs(r - targetR) <= tolerance && 
-                           Math.abs(g - targetG) <= tolerance && 
-                           Math.abs(b - targetB) <= tolerance;
-                }
+                // Group peaks into rows and columns
+                const xGridLines = groupPeaks(xPeaks, width * 0.03);
+                const yGridLines = groupPeaks(yPeaks, height * 0.03);
                 
-                // Find horizontal lines of green pixels
-                for (let y = 0; y < height; y += 2) {
-                    let startX = -1;
-                    for (let x = 0; x < width; x += 1) {
-                        if (isGreen(x, y)) {
-                            if (startX === -1) startX = x;
-                        } else if (startX !== -1) {
-                            // We found a horizontal green line from startX to x-1
-                            const lineLength = x - startX;
-                            if (lineLength > minCellSize) {
-                                // Check for vertical lines that could form a rectangle
-                                let foundRect = findRectangle(startX, y, lineLength);
-                                if (foundRect) {
-                                    cells.push(foundRect);
-                                }
+                // Sort grid lines
+                xGridLines.sort((a, b) => a - b);
+                yGridLines.sort((a, b) => a - b);
+                
+                // Create cells from grid intersections
+                if (xGridLines.length >= expectedCols+1 && yGridLines.length >= expectedRows+1) {
+                    // We found a grid structure, create cells
+                    for (let i = 0; i < yGridLines.length-1; i++) {
+                        for (let j = 0; j < xGridLines.length-1; j++) {
+                            const x = xGridLines[j];
+                            const y = yGridLines[i];
+                            const width = xGridLines[j+1] - x;
+                            const height = yGridLines[i+1] - y;
+                            
+                            // Only keep cells with reasonable size
+                            if (width > 30 && height > 30) {
+                                cells.push({
+                                    x, y, width, height,
+                                    character: getCharacterForPosition(i, j)
+                                });
                             }
-                            startX = -1;
                         }
                     }
                 }
                 
-                // Helper function to find a rectangle starting from a horizontal line
-                function findRectangle(startX, startY, lineLength) {
-                    // Look for vertical green lines descending from both ends of the horizontal line
-                    let leftFound = false;
-                    let rightFound = false;
-                    let maxHeight = 0;
-                    
-                    // Check how far down we can go following the left edge
-                    for (let y = startY + 1; y < startY + height/2; y++) { 
-                        if (isGreen(startX, y)) {
-                            maxHeight = y - startY;
-                        } else {
-                            break;
-                        }
-                    }
-                    
-                    if (maxHeight < minCellSize) return null;
-                    
-                    // Check how far down we can go following the right edge
-                    const endX = startX + lineLength - 1;
-                    let rightHeight = 0;
-                    for (let y = startY + 1; y < startY + maxHeight; y++) {
-                        if (isGreen(endX, y)) {
-                            rightHeight = y - startY;
-                        } else {
-                            break;
-                        }
-                    }
-                    
-                    if (rightHeight < minCellSize) return null;
-                    
-                    // Use the smaller of the two heights
-                    const rectHeight = Math.min(maxHeight, rightHeight);
-                    
-                    // Check bottom horizontal line
-                    let bottomY = startY + rectHeight;
-                    let bottomLine = true;
-                    for (let x = startX; x <= endX; x++) {
-                        if (!isGreen(x, bottomY)) {
-                            bottomLine = false;
-                            break;
-                        }
-                    }
-                    
-                    if (!bottomLine) return null;
-                    
-                    // We found a rectangle! Check if it has content inside
-                    const cellId = `${startX},${startY},${lineLength},${rectHeight}`;
-                    if (visited.has(cellId)) return null;
-                    visited.add(cellId);
-                    
-                    // Check for non-green content inside the rectangle
-                    let nonGreenCount = 0;
-                    const innerPadding = 5; // Padding to avoid counting the outline
-                    for (let y = startY + innerPadding; y < startY + rectHeight - innerPadding; y += 2) {
-                        for (let x = startX + innerPadding; x < startX + lineLength - innerPadding; x += 2) {
-                            if (!isGreen(x, y)) {
-                                nonGreenCount++;
-                            }
-                            if (nonGreenCount >= minContentSize * minContentSize / 4) {
-                                // Enough non-green content found
-                                return {
-                                    x: startX,
-                                    y: startY,
-                                    width: lineLength,
-                                    height: rectHeight,
-                                    contentRatio: nonGreenCount / ((lineLength - 2 * innerPadding) * (rectHeight - 2 * innerPadding) / 4)
-                                };
-                            }
-                        }
-                    }
-                    
-                    return null; // Not enough content inside
-                }
-                
-                // If we didn't find enough cells, try column-by-column scanning
+                // If grid detection didn't work, fall back to rectangular region detection
                 if (cells.length < 8) {
-                    // Similar logic but scanning vertical lines first, omitted for brevity
+                    updateStatus('Grid detection insufficient, trying region detection...');
+                    return detectRectangularRegions(greenPixels, width, height, imageData);
                 }
                 
-                // Map detected cells to character data
-                return mapCellsToCharacters(cells);
+                return cells;
             }
             
-            // Map detected cells to character data
-            function mapCellsToCharacters(cells) {
-                if (cells.length === 0) return [];
+            // Detect rectangular regions formed by green pixels
+            function detectRectangularRegions(greenPixels, width, height, imageData) {
+                // Create a 2D map of green pixel locations for faster lookup
+                const greenMap = {};
+                greenPixels.forEach(pixel => {
+                    if (!greenMap[pixel.y]) greenMap[pixel.y] = {};
+                    greenMap[pixel.y][pixel.x] = true;
+                });
                 
-                // Sort cells by position (top to bottom, left to right)
-                cells.sort((a, b) => {
-                    // Group cells into rows based on Y position
-                    const rowThreshold = 20; // Cells within this Y distance are considered in the same row
-                    const rowDiff = Math.abs(a.y - b.y);
-                    if (rowDiff <= rowThreshold) {
-                        return a.x - b.x; // Same row, sort by X
+                // Find connected components (rectangles)
+                const visited = {};
+                const rectangles = [];
+                const minRectSize = 30;  // Minimum rect size to consider
+                
+                // Check each green pixel as a potential corner
+                greenPixels.forEach(pixel => {
+                    if (visited[`${pixel.y},${pixel.x}`]) return;
+                    
+                    // Try to grow a rectangle from this pixel
+                    const rect = growRectangle(pixel.x, pixel.y, greenMap, visited, width, height);
+                    if (rect && rect.width > minRectSize && rect.height > minRectSize) {
+                        // Check if the rectangle has non-green content
+                        if (hasNonGreenContent(rect, greenMap, width, height, imageData)) {
+                            rectangles.push(rect);
+                        }
                     }
-                    return a.y - b.y; // Different rows, sort by Y
                 });
                 
-                // Assign character data to cells
-                const maxCols = 5; // Maximum expected columns based on image
+                // Map rectangles to characters
+                return mapRectanglesToCharacters(rectangles);
+            }
+            
+            // Grow a rectangle from a starting corner
+            function growRectangle(startX, startY, greenMap, visited, width, height) {
+                // Mark starting pixel as visited
+                visited[`${startY},${startX}`] = true;
+                
+                // Find maximum rectangle width (rightward)
+                let maxWidth = 1;
+                for (let x = startX + 1; x < width; x++) {
+                    if (greenMap[startY] && greenMap[startY][x]) {
+                        maxWidth = x - startX + 1;
+                        visited[`${startY},${x}`] = true;
+                    } else {
+                        break;
+                    }
+                }
+                
+                if (maxWidth < 20) return null; // Too narrow
+                
+                // Find maximum rectangle height (downward)
+                let maxHeight = 1;
+                let isValidRect = false;
+                
+                for (let y = startY + 1; y < height; y++) {
+                    // Check if the left edge is green
+                    if (!(greenMap[y] && greenMap[y][startX])) break;
+                    
+                    // Check if the right edge is green
+                    if (!(greenMap[y] && greenMap[y][startX + maxWidth - 1])) break;
+                    
+                    // Check bottom edge when we've gone far enough
+                    if (y - startY >= maxWidth * 0.5) { // Rectangular aspect ratio check
+                        let hasBottomEdge = true;
+                        for (let x = startX; x < startX + maxWidth; x++) {
+                            if (!(greenMap[y] && greenMap[y][x])) {
+                                hasBottomEdge = false;
+                                break;
+                            }
+                        }
+                        
+                        if (hasBottomEdge) {
+                            maxHeight = y - startY + 1;
+                            isValidRect = true;
+                            
+                            // Mark all edge pixels as visited
+                            for (let x = startX; x < startX + maxWidth; x++) {
+                                visited[`${y},${x}`] = true;
+                            }
+                            for (let tempY = startY; tempY <= y; tempY++) {
+                                visited[`${tempY},${startX}`] = true;
+                                visited[`${tempY},${startX + maxWidth - 1}`] = true;
+                            }
+                            
+                            break;
+                        }
+                    }
+                    
+                    // Mark edge pixels as visited
+                    visited[`${y},${startX}`] = true;
+                    visited[`${y},${startX + maxWidth - 1}`] = true;
+                }
+                
+                if (!isValidRect || maxHeight < 20) return null; // Not a complete rectangle or too short
+                
+                return {
+                    x: startX,
+                    y: startY,
+                    width: maxWidth,
+                    height: maxHeight
+                };
+            }
+            
+            // Check if a rectangle has non-green content inside
+            function hasNonGreenContent(rect, greenMap, width, height, imageData) {
+                const padding = 5; // Avoid checking the border pixels
+                let nonGreenCount = 0;
+                const minNonGreenPixels = 25 * 25; // Minimum non-green pixels to consider valid content
+                
+                // Sample the interior of the rectangle
+                for (let y = rect.y + padding; y < rect.y + rect.height - padding; y += 2) {
+                    if (y >= height) continue;
+                    
+                    for (let x = rect.x + padding; x < rect.x + rect.width - padding; x += 2) {
+                        if (x >= width) continue;
+                        
+                        // If the pixel is not marked as green, count it
+                        if (!(greenMap[y] && greenMap[y][x])) {
+                            nonGreenCount++;
+                            if (nonGreenCount >= minNonGreenPixels / 4) { // Divide by 4 because we're sampling every 2 pixels
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                return false;
+            }
+            
+            // Map rectangles to characters based on position
+            function mapRectanglesToCharacters(rectangles) {
+                if (rectangles.length === 0) return [];
+                
+                // Expected grid dimensions
+                const expectedRows = 4;
+                const expectedCols = 4;
+                
+                // Sort rectangles by position
+                const sorted = [...rectangles].sort((a, b) => {
+                    // First sort by y-coordinate (top to bottom)
+                    const yDiff = a.y - b.y;
+                    if (Math.abs(yDiff) > 20) return yDiff;
+                    
+                    // If in the same row, sort by x-coordinate (left to right)
+                    return a.x - b.x;
+                });
+                
+                // Group into rows based on y-position
+                const rows = [];
+                let currentRow = [sorted[0]];
+                
+                for (let i = 1; i < sorted.length; i++) {
+                    const prevRect = sorted[i-1];
+                    const currRect = sorted[i];
+                    
+                    // If y-position is similar, add to current row
+                    if (Math.abs(currRect.y - prevRect.y) <= 20) {
+                        currentRow.push(currRect);
+                    } else {
+                        // Start a new row
+                        rows.push(currentRow);
+                        currentRow = [currRect];
+                    }
+                }
+                
+                // Add the last row
+                if (currentRow.length > 0) {
+                    rows.push(currentRow);
+                }
+                
+                // Sort each row by x-position
+                rows.forEach(row => {
+                    row.sort((a, b) => a.x - b.x);
+                });
+                
+                // Map to characters
                 const characters = characterSelectionTemplate.characters;
-                const mappedCells = cells.slice(0, characters.length).map((cell, index) => {
-                    const row = Math.floor(index / maxCols);
-                    const col = index % maxCols;
-                    const charIndex = Math.min(index, characters.length - 1);
-                    return {
-                        ...cell,
-                        row,
-                        col,
-                        character: characters[charIndex]
-                    };
-                });
+                const result = [];
                 
-                return mappedCells;
+                for (let r = 0; r < Math.min(rows.length, expectedRows); r++) {
+                    const row = rows[r];
+                    for (let c = 0; c < Math.min(row.length, expectedCols); c++) {
+                        const charIndex = r * expectedCols + c;
+                        if (charIndex < characters.length) {
+                            result.push({
+                                ...row[c],
+                                character: characters[charIndex]
+                            });
+                        }
+                    }
+                }
+                
+                return result;
+            }
+            
+            // Find peaks in a histogram
+            function findPeaks(histogram, threshold) {
+                const peaks = [];
+                const smoothed = smoothHistogram(histogram, 5);
+                
+                for (let i = 2; i < smoothed.length - 2; i++) {
+                    if (smoothed[i] > threshold && 
+                        smoothed[i] > smoothed[i-1] && 
+                        smoothed[i] > smoothed[i-2] && 
+                        smoothed[i] > smoothed[i+1] && 
+                        smoothed[i] > smoothed[i+2]) {
+                        peaks.push(i);
+                    }
+                }
+                
+                return peaks;
+            }
+            
+            // Smooth a histogram using moving average
+            function smoothHistogram(histogram, windowSize) {
+                const result = new Array(histogram.length).fill(0);
+                
+                for (let i = 0; i < histogram.length; i++) {
+                    let sum = 0;
+                    let count = 0;
+                    
+                    for (let j = Math.max(0, i - windowSize); j <= Math.min(histogram.length - 1, i + windowSize); j++) {
+                        sum += histogram[j];
+                        count++;
+                    }
+                    
+                    result[i] = sum / count;
+                }
+                
+                return result;
+            }
+            
+            // Group nearby peaks into single representative values
+            function groupPeaks(peaks, distance) {
+                if (peaks.length === 0) return [];
+                
+                const groups = [];
+                let currentGroup = [peaks[0]];
+                
+                for (let i = 1; i < peaks.length; i++) {
+                    if (peaks[i] - peaks[i-1] <= distance) {
+                        // Add to current group
+                        currentGroup.push(peaks[i]);
+                    } else {
+                        // Create a new group
+                        groups.push(currentGroup);
+                        currentGroup = [peaks[i]];
+                    }
+                }
+                
+                // Add the last group
+                if (currentGroup.length > 0) {
+                    groups.push(currentGroup);
+                }
+                
+                // Calculate the average value for each group
+                return groups.map(group => {
+                    return Math.floor(group.reduce((sum, val) => sum + val, 0) / group.length);
+                });
+            }
+            
+            // Get character data for a given position
+            function getCharacterForPosition(row, col) {
+                const index = row * 4 + col;
+                if (index < characterSelectionTemplate.characters.length) {
+                    return characterSelectionTemplate.characters[index];
+                }
+                return null;
             }
             
             // Create interactive overlay with hover effects
@@ -534,14 +730,23 @@ ${JSON.stringify(characterSelectionTemplate.characters, null, 2)}`;
                         cellElement.dataset.name = cell.character.name;
                         cellElement.dataset.country = cell.character.country;
                         
-                        // Add tooltip
-                        cellElement.title = `${cell.character.name} (${cell.character.country})`;
+                        // Add name label
+                        const nameElement = document.createElement('div');
+                        nameElement.className = 'character-name';
+                        nameElement.textContent = `${cell.character.name} (${cell.character.country})`;
+                        cellElement.appendChild(nameElement);
                     }
                     
                     // Add click event
                     cellElement.addEventListener('click', () => {
                         if (cell.character) {
                             updateStatus(`Selected: ${cell.character.name} from ${cell.character.country}`);
+                            
+                            // Flash effect on selection
+                            cellElement.style.boxShadow = '0 0 15px #FFFFFF, inset 0 0 15px #FFFFFF';
+                            setTimeout(() => {
+                                cellElement.style.boxShadow = '';
+                            }, 300);
                         }
                     });
                     
